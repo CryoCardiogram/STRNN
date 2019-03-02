@@ -8,13 +8,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.autograd import Variable
 import data_loader
 
 # Parameters
 # ==================================================
-ftype = torch.cuda.FloatTensor
-ltype = torch.cuda.LongTensor
+ftype = torch.FloatTensor
+ltype = torch.LongTensor
+if torch.cuda.is_available():
+    ftype = torch.cuda.FloatTensor
+    ltype = torch.cuda.LongTensor
 
 # Data loading params
 train_file = "./prepro_train_50.txt"
@@ -63,11 +67,11 @@ class STRNNCell(nn.Module):
     def __init__(self, hidden_size):
         super(STRNNCell, self).__init__()
         self.hidden_size = hidden_size
-        self.weight_ih = nn.Parameter(torch.Tensor(hidden_size, hidden_size)) # C
-        self.weight_th_upper = nn.Parameter(torch.Tensor(hidden_size, hidden_size)) # T
-        self.weight_th_lower = nn.Parameter(torch.Tensor(hidden_size, hidden_size)) # T
-        self.weight_sh_upper = nn.Parameter(torch.Tensor(hidden_size, hidden_size)) # S
-        self.weight_sh_lower = nn.Parameter(torch.Tensor(hidden_size, hidden_size)) # S
+        self.weight_ih = nn.Parameter(torch.randn(hidden_size, hidden_size)) # C
+        self.weight_th_upper = nn.Parameter(torch.randn(hidden_size, hidden_size)) # T
+        self.weight_th_lower = nn.Parameter(torch.randn(hidden_size, hidden_size)) # T
+        self.weight_sh_upper = nn.Parameter(torch.randn(hidden_size, hidden_size)) # S
+        self.weight_sh_lower = nn.Parameter(torch.randn(hidden_size, hidden_size)) # S
 
         self.location_weight = nn.Embedding(loc_cnt, hidden_size)
         self.permanet_weight = nn.Embedding(user_cnt, hidden_size)
@@ -84,13 +88,12 @@ class STRNNCell(nn.Module):
     def forward(self, td_upper, td_lower, ld_upper, ld_lower, loc, hx):
         loc_len = len(loc)
         Ttd = [((self.weight_th_upper*td_upper[i] + self.weight_th_lower*td_lower[i])\
-                /(td_upper[i]+td_lower[i])) for i in xrange(loc_len)]
+                / (td_upper[i]+td_lower[i])) for i in xrange(loc_len)]
         Sld = [((self.weight_sh_upper*ld_upper[i] + self.weight_sh_lower*ld_lower[i])\
-                /(ld_upper[i]+ld_lower[i])) for i in xrange(loc_len)]
+                / (ld_upper[i]+ld_lower[i])) for i in xrange(loc_len)]
 
-        loc = self.location_weight(loc).view(-1,self.hidden_size,1)
-        loc_vec = torch.sum(torch.cat([torch.mm(Sld[i], torch.mm(Ttd[i], loc[i]))\
-                .view(1,self.hidden_size,1) for i in xrange(loc_len)], dim=0), dim=0)
+        loc = self.location_weight(loc).view(-1, self.hidden_size, 1)
+        loc_vec = torch.sum(torch.cat(tuple(torch.mm(Sld[i], torch.mm(Ttd[i], loc[i])) for i in xrange(loc_len)) ))
         usr_vec = torch.mm(self.weight_ih, hx)
         hx = loc_vec + usr_vec # hidden_size x 1
         return self.sigmoid(hx)
@@ -118,6 +121,7 @@ def parameters():
         params += list(model.parameters())
 
     return params
+
 
 def print_score(batches, step):
     recall1 = 0.
@@ -150,6 +154,8 @@ def print_score(batches, step):
     print("recall@10000: ", recall10000/iter_cnt)
 
 ###############################################################################################
+
+
 def run(user, td, ld, loc, dst, step):
 
     optimizer.zero_grad()
@@ -186,8 +192,8 @@ def run(user, td, ld, loc, dst, step):
     return J.data.cpu().numpy()
 
 ###############################################################################################
-strnn_model = STRNNCell(dim).cuda()
-optimizer = torch.optim.SGD(parameters(), lr=learning_rate, momentum=momentum, weight_decay=reg_lambda)
+strnn_model = STRNNCell(dim).cuda() if torch.cuda.is_available() else STRNNCell(dim)
+optimizer = optim.SGD(parameters(), lr=learning_rate, momentum=momentum, weight_decay=reg_lambda)
 
 for i in xrange(num_epochs):
     # Training
