@@ -16,9 +16,6 @@ import data_loader
 # ==================================================
 ftype = torch.FloatTensor
 ltype = torch.LongTensor
-if torch.cuda.is_available():
-    ftype = torch.cuda.FloatTensor
-    ltype = torch.cuda.LongTensor
 
 # Data loading params
 train_file = "./prepro_train_50.txt"
@@ -192,7 +189,7 @@ def run(user, td, ld, loc, dst, step):
     return J.data.cpu().numpy()
 
 ###############################################################################################
-strnn_model = STRNNCell(dim).cuda() if torch.cuda.is_available() else STRNNCell(dim)
+strnn_model = STRNNCell(dim)
 optimizer = optim.SGD(parameters(), lr=learning_rate, momentum=momentum, weight_decay=reg_lambda)
 
 for i in xrange(num_epochs):

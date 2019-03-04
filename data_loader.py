@@ -77,18 +77,19 @@ def load_data(train):
     test_longi = []
     test_loc = []
 
-    train_f = open(train, 'r')
-    lines = train_f.readlines()
-
     user_time = []
     user_lati = []
     user_longi = []
     user_loc = []
     visit_thr = 30
 
-    prev_user = int(lines[0].split('\t')[0])
+    first_user = int(open(train, 'r').readline().split('\t')[0])
+    prev_user = first_user
     visit_cnt = 0
-    for i, line in enumerate(lines):
+
+    # 1) populate user2id map
+    # user2id assign an id to each user (starting from 1)
+    for line in open(train, 'r'):
         tokens = line.strip().split('\t')
         user = int(tokens[0])
         if user==prev_user:
@@ -99,11 +100,10 @@ def load_data(train):
             prev_user = user
             visit_cnt = 1
 
-    train_f = open(train, 'r')
-    lines = train_f.readlines()
 
-    prev_user = int(lines[0].split('\t')[0])
-    for i, line in enumerate(lines):
+    # poi2id assign id to each newly encountered location 
+    prev_user = first_user
+    for line in open(train, 'r'):
         tokens = line.strip().split('\t')
         user = int(tokens[0])
         if user2id.get(user) is None:
