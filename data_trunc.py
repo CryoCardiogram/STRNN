@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys
+
 
 def truncate(data_path: str, n_chunks: int, idx=0):
     """ Create a smaller dataset of the initial dataset, saved in `trunc_data_path`.
@@ -22,6 +22,7 @@ def truncate(data_path: str, n_chunks: int, idx=0):
         for l in output:
             out.write(l)
 
+
 def truncate_gowalla_integrity(data_path, rate=0.5, ustart=0):
     """Create a smaller dataset by truncating `rate` percent of the users. 
 
@@ -30,7 +31,7 @@ def truncate_gowalla_integrity(data_path, rate=0.5, ustart=0):
         rate: rate of users to dismiss. 
         ustart: id of starting user
     """
-    #count users
+    # count users
     lines = open(data_path, 'r').readlines()
     print('{} lines in original dataset'.format(len(lines)))
     prev_user = 0

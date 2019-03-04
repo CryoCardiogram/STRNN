@@ -13,11 +13,11 @@ import data_loader
 
 # Parameters
 # ==================================================
-ftype = torch.cuda.FloatTensor
-ltype = torch.cuda.LongTensor
+ftype = torch.FloatTensor
+ltype = torch.LongTensor
 
 # Data loading params
-train_file = "../dataset/loc-gowalla_totalCheckins.txt"
+train_file = "TCintr_urate05.txt"
 
 # Model Hyperparameters
 dim = 13    # dimensionality
@@ -64,6 +64,7 @@ class STRNNModule(nn.Module):
 
     # find the most closest value to w, w_cap(index)
     def find_w_cap(self, times, i):
+        #TODO replace 0 dim tensors with .items() method
         trg_t = times[i] - ww
         tmp_t = times[i]
         tmp_i = i-1
@@ -88,18 +89,23 @@ class STRNNModule(nn.Module):
         else:
             self.return_h_tw(times, latis, longis, locs, w_cap)
 
-        lati = latis[idx] - latis[w_cap:idx]
-        longi = longis[idx] - longis[w_cap:idx]
+        #lati = latis[idx] - latis[w_cap:idx]
+        #longi = longis[idx] - longis[w_cap:idx]
         td = times[idx] - times[w_cap:idx]
-        ld = self.euclidean_dist(lati, longi)
+        #TODO torch.dist p2
+        #TODO this is distance between lat and long vectors ?
+        x = torch.cat((latis[idx], longis[idx]))
+        y = torch.cat((latis[w_cap:idx], longis[w_cap:idx] ))
+        #ld = self.euclidean_dist(lati, longi)
+        ld = torch.dist(x, y, p=2)
 
         data = ','.join(str(e) for e in td.data.cpu().numpy())+"\t"
         f.write(data)
         data = ','.join(str(e) for e in ld.data.cpu().numpy())+"\t"
         f.write(data)
-        data = ','.join(str(e.data.cpu().numpy()[0]) for e in locs[w_cap:idx])+"\t"
+        data = ','.join(str(e.item()) for e in locs[w_cap:idx])+"\t"
         f.write(data)
-        data = str(locs[idx].data.cpu().numpy()[0])+"\n"
+        data = str(locs[idx].item())+"\n"
         f.write(data)
 
     # get transition matrices by linear interpolation
@@ -109,7 +115,7 @@ class STRNNModule(nn.Module):
         lud = up_dist - ld
         ldd = ld - lw_dist
         loc_vec = 0
-        for i in xrange(len(tud)):
+        for i in range(len(tud)):
             Tt = torch.div(torch.mul(self.time_upper, tud[i]) + torch.mul(self.time_lower, tdd[i]),
                             tud[i]+tdd[i])
             Sl = torch.div(torch.mul(self.dist_upper, lud[i]) + torch.mul(self.dist_lower, ldd[i]),
@@ -137,31 +143,37 @@ def run(user, time, lati, longi, loc, step):
     rnn_output = strnn_model(user, time, lati, longi, loc, step)#, neg_lati, neg_longi, neg_loc, step)
 
 ###############################################################################################
-strnn_model = STRNNModule().cuda()
+strnn_model = STRNNModule()
 
-print "Making train file..."
+print("Making train file...")
 f = open("./prepro_train_%s.txt"%lw_time, 'w')
 # Training
 train_batches = list(zip(train_time, train_lati, train_longi, train_loc))
 for j, train_batch in enumerate(tqdm.tqdm(train_batches, desc="train")):
     batch_time, batch_lati, batch_longi, batch_loc = train_batch#inner_batch)
+    if len(batch_time) < 1:
+        continue
     run(train_user[j], batch_time, batch_lati, batch_longi, batch_loc, step=1)
 f.close()
 
-print "Making valid file..."
+print("Making valid file...")
 f = open("./prepro_valid_%s.txt"%lw_time, 'w')
 # Eavludating
 valid_batches = list(zip(valid_time, valid_lati, valid_longi, valid_loc))
 for j, valid_batch in enumerate(tqdm.tqdm(valid_batches, desc="valid")):
     batch_time, batch_lati, batch_longi, batch_loc = valid_batch#inner_batch)
+    if len(batch_time) < 1:
+        continue
     run(valid_user[j], batch_time, batch_lati, batch_longi, batch_loc, step=2)
 f.close()
 
-print "Making test file..."
+print("Making test file...")
 f = open("./prepro_test_%s.txt"%lw_time, 'w')
 # Testing
 test_batches = list(zip(test_time, test_lati, test_longi, test_loc))
 for j, test_batch in enumerate(tqdm.tqdm(test_batches, desc="test")):
     batch_time, batch_lati, batch_longi, batch_loc = test_batch#inner_batch)
+    if len(batch_time) < 1:
+        continue
     run(test_user[j], batch_time, batch_lati, batch_longi, batch_loc, step=3)
 f.close()
