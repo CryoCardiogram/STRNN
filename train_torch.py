@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.multiprocessing as mp
 from torch.autograd import Variable
 import data_loader
 
@@ -58,7 +59,7 @@ valid_user, valid_td, valid_ld, valid_loc, valid_dst = data_loader.treat_prepro(
 test_user, test_td, test_ld, test_loc, test_dst = data_loader.treat_prepro(test_file, step=3)
 
 user_cnt = len(train_user) + len(valid_user) + len(test_user)
-loc_cnt = len(train_loc) + len(valid_loc) + len(test_loc)
+loc_cnt = sum(len(i) for i in train_loc) + sum(len(i) for i in valid_loc) + sum(len(i) for i in test_loc)
 
 print("User/Location: {:d}/{:d}".format(user_cnt, loc_cnt))
 print("==================================================================================")
@@ -115,7 +116,7 @@ class STRNNCell(nn.Module):
         return np.argsort(np.squeeze(-1*ret))
 
 ###############################################################################################
-def parameters():
+def parameters(strnn_model):
     params = []
     for model in [strnn_model]:
         params += list(model.parameters())
@@ -192,62 +193,100 @@ def run(user, td, ld, loc, dst, step):
     return J.data.cpu().numpy()
 
 ###############################################################################################
-strnn_model = STRNNCell(dim)
-optimizer = optim.SGD(parameters(), lr=learning_rate, momentum=momentum, weight_decay=reg_lambda)
-loss_per_epoch = {}
-first_pass = False
-# load data from checkpoint
-try:
-    checkpoint = torch.load('checkpoint.tar')
-    loss_per_epoch = checkpoint['loss_per_epoch']
-    strnn_model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['model_state_dict'])
-    strnn_model.train()
-    first_pass = True
-except FileNotFoundError:
-    checkpoint = None
 
-for i in xrange(num_epochs if checkpoint is None else num_epochs - checkpoint['epoch']):
-    # Training
-    total_loss = 0.
 
-    if first_pass and checkpoint is not None:
-        total_loss = checkpoint['current_loss']
-        first_pass = False
+def train(model):
 
-    train_batches = list(zip(train_user, train_td, train_ld, train_loc, train_dst))
+    loss_per_epoch = {}
+
+    first_pass = False
+    # load data from checkpoint
     try:
-        for j, train_batch in enumerate(tqdm.tqdm(train_batches, desc="train")):
-            #inner_batches = data_loader.inner_iter(train_batch, batch_size)
-            #for k, inner_batch in inner_batches:
-            batch_user, batch_td, batch_ld, batch_loc, batch_dst = train_batch#inner_batch)
-            if len(batch_loc) < 3:
-                continue
-            loss = run(batch_user, batch_td, batch_ld, batch_loc, batch_dst, step=1)
-            total_loss += loss
-            #if (j+1) % 2000 == 0:
-            #    print("batch #{:d}: ".format(j+1)), "batch_loss :", total_loss/j, datetime.datetime.now()
-        # Evaluation
-        if (i+1) % evaluate_every == 0:
-            print("==================================================================================")
-            #print("Evaluation at epoch #{:d}: ".format(i+1)), total_loss/j, datetime.datetime.now()
-            valid_batches = list(zip(valid_user, valid_td, valid_ld, valid_loc, valid_dst))
-            print_score(valid_batches, step=2)
+        checkpoint = torch.load('checkpoint.tar')
+        loss_per_epoch = checkpoint['loss_per_epoch']
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['model_state_dict'])
+        model.train()
+        first_pass = True
+    except FileNotFoundError:
+        checkpoint = None
 
-        loss_per_epoch[i] = total_loss
-    except KeyboardInterrupt:
-        torch.save({
-            'epoch': i,
-            'model_state_dict': strnn_model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'current_loss': total_loss,
-            'loss_per_epoch': loss_per_epoch
-        }, "checkpoint.tar")
-        raise KeyboardInterrupt()
+    for i in xrange(num_epochs if checkpoint is None else num_epochs - checkpoint['epoch']):
+        # Training
+        total_loss = 0.
 
-# Testing
-print("Training End..")
-print("==================================================================================")
-print("Test: ")
-test_batches = list(zip(test_user, test_td, test_ld, test_loc, test_dst))
-print_score(test_batches, step=3)
+        if first_pass and checkpoint is not None:
+            # restore currrent total loss
+            total_loss = checkpoint['current_loss']
+            first_pass = False
+
+        train_batches = list(zip(train_user, train_td, train_ld, train_loc, train_dst))
+        try:
+            for j, train_batch in enumerate(tqdm.tqdm(train_batches, desc="train")):
+                # inner_batches = data_loader.inner_iter(train_batch, batch_size)
+                # for k, inner_batch in inner_batches:
+                batch_user, batch_td, batch_ld, batch_loc, batch_dst = train_batch  # inner_batch)
+                if len(batch_loc) < 3:
+                    continue
+                loss = run(batch_user, batch_td, batch_ld, batch_loc, batch_dst, step=1)
+                total_loss += loss
+                # if (j+1) % 2000 == 0:
+                #    print("batch #{:d}: ".format(j+1)), "batch_loss :", total_loss/j, datetime.datetime.now()
+            # Evaluation
+            if (i + 1) % evaluate_every == 0:
+                print("==================================================================================")
+                # print("Evaluation at epoch #{:d}: ".format(i+1)), total_loss/j, datetime.datetime.now()
+                valid_batches = list(zip(valid_user, valid_td, valid_ld, valid_loc, valid_dst))
+                print_score(valid_batches, step=2)
+
+            loss_per_epoch[i] = total_loss
+        except KeyboardInterrupt:
+            torch.save({
+                'epoch': i,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'current_loss': total_loss,
+                'loss_per_epoch': loss_per_epoch
+            }, "checkpoint.tar")
+            raise KeyboardInterrupt()
+
+
+###############################################################################################
+
+
+def multiproc_train(model, num_proc):
+    """
+    Train the model across `num_proc` processes
+    :param model: torch model instance
+    :param optimizer: torch optimizer instance
+    :param: num_proc: number of processes
+    :return:
+    """
+    model.share_memory()
+    processes = []
+    # launch the processes
+    print("launching processes...")
+    for rank in range(num_proc):
+        p = mp.Process(target=train, args=(model,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+
+
+
+
+
+if __name__ == '__main__':
+    strnn_model = STRNNCell(dim)
+    optimizer = optim.SGD(parameters(strnn_model), lr=learning_rate, momentum=momentum, weight_decay=reg_lambda)
+    num_processes = torch.get_num_threads()
+    train(strnn_model)
+
+
+    # Testing
+    print("Training End..")
+    print("==================================================================================")
+    print("Test: ")
+    test_batches = list(zip(test_user, test_td, test_ld, test_loc, test_dst))
+    print_score(test_batches, step=3)
