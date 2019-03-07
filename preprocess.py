@@ -21,7 +21,7 @@ train_file = "TCintr_urate05.txt"
 
 # Model Hyperparameters
 dim = 13    # dimensionality
-ww = 360  # winodw width (6h)
+ww = 720  # winodw width (6h)
 up_time = 1440  # 1d
 lw_time = 50    # 50m
 up_dist = 100   # ??
@@ -89,15 +89,15 @@ class STRNNModule(nn.Module):
         else:
             self.return_h_tw(times, latis, longis, locs, w_cap)
 
-        #lati = latis[idx] - latis[w_cap:idx]
-        #longi = longis[idx] - longis[w_cap:idx]
+        lati = latis[idx] - latis[w_cap:idx]
+        longi = longis[idx] - longis[w_cap:idx]
         td = times[idx] - times[w_cap:idx]
         #TODO torch.dist p2
         #TODO this is distance between lat and long vectors ?
-        x = torch.cat((latis[idx], longis[idx]))
-        y = torch.cat((latis[w_cap:idx], longis[w_cap:idx] ))
-        #ld = self.euclidean_dist(lati, longi)
-        ld = torch.dist(x, y, p=2)
+        #x = torch.cat((latis[idx], longis[idx]))
+        #y = torch.cat((latis[w_cap:idx], longis[w_cap:idx] ))
+        ld = self.euclidean_dist(lati, longi)
+        #ld = torch.dist(x, y, p=2)
 
         data = ','.join(str(e) for e in td.data.cpu().numpy())+"\t"
         f.write(data)

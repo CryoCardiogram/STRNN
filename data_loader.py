@@ -1,6 +1,7 @@
 import numpy as np
 from datetime import datetime
 import pandas as pd
+import csv
 
 def treat_prepro(train, step):
     train_f = open(train, 'r')
@@ -176,3 +177,29 @@ def inner_iter(data, batch_size):
         start_index = batch_num * batch_size
         end_index = min((batch_num + 1) * batch_size, data_size)
         yield data[start_index:end_index]
+
+def perf2df(fpath):
+    data = {
+        'recall@1': [],
+        'recall@5': [],
+        'recall@10': [],
+        'recall@100': [],
+        'recall@1000': [],
+        'recall@10000': []
+    }
+
+    for line in open(fpath, 'r'):
+        if len(line) < 10:
+            continue
+        tokens = line.split(':')
+        recall = tokens[0]
+        value = float(tokens[1].strip())
+        data[recall].append(value)
+
+    return pd.DataFrame(data=data, columns=['recall@1',
+        'recall@5',
+        'recall@10',
+        'recall@100',
+        'recall@1000',
+        'recall@10000'])
+

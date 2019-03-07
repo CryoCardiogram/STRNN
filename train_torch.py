@@ -1,17 +1,16 @@
 #! /usr/bin/env python
 
-import os
-import datetime
-import math
+
+import sys
 import tqdm
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import torch.multiprocessing as mp
-from torch.autograd import Variable
+import configargparse
 import data_loader
+import torch.optim as optim
+from torch.autograd import Variable
+from model import STRNN
+
 
 # Parameters
 # ==================================================
@@ -25,7 +24,7 @@ test_file = "./prepro_test_50.txt"
 
 # Model Hyperparameters
 dim = 13    # dimensionality
-ww = 360  # winodw width (6h)
+ww = 720  # winodw width (6h)
 up_time = 560632.0  # min
 lw_time = 0.
 up_dist = 457.335   # km
@@ -45,11 +44,6 @@ h_0 = Variable(torch.randn(dim, 1), requires_grad=False).type(ftype)
 #user_cnt = 42242 #30
 #loc_cnt = 1164559 #30
 
-try:
-    xrange
-except NameError:
-    xrange = range
-
 # Data Preparation
 # ===========================================================
 # Load data
@@ -63,57 +57,6 @@ loc_cnt = sum(len(i) for i in train_loc) + sum(len(i) for i in valid_loc) + sum(
 
 print("User/Location: {:d}/{:d}".format(user_cnt, loc_cnt))
 print("==================================================================================")
-
-class STRNNCell(nn.Module):
-    def __init__(self, hidden_size):
-        super(STRNNCell, self).__init__()
-        self.hidden_size = hidden_size
-        self.weight_ih = nn.Parameter(torch.randn(hidden_size, hidden_size)) # C
-        self.weight_th_upper = nn.Parameter(torch.randn(hidden_size, hidden_size)) # T
-        self.weight_th_lower = nn.Parameter(torch.randn(hidden_size, hidden_size)) # T
-        self.weight_sh_upper = nn.Parameter(torch.randn(hidden_size, hidden_size)) # S
-        self.weight_sh_lower = nn.Parameter(torch.randn(hidden_size, hidden_size)) # S
-
-        self.location_weight = nn.Embedding(loc_cnt, hidden_size)
-        self.permanet_weight = nn.Embedding(user_cnt, hidden_size)
-
-        self.sigmoid = nn.Sigmoid()
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
-
-    def forward(self, td_upper, td_lower, ld_upper, ld_lower, loc, hx):
-        loc_len = len(loc)
-        Ttd = [((self.weight_th_upper*td_upper[i] + self.weight_th_lower*td_lower[i])\
-                / (td_upper[i]+td_lower[i])) for i in xrange(loc_len)]
-        Sld = [((self.weight_sh_upper*ld_upper[i] + self.weight_sh_lower*ld_lower[i])\
-                / (ld_upper[i]+ld_lower[i])) for i in xrange(loc_len)]
-
-        loc = self.location_weight(loc).view(-1, self.hidden_size, 1)
-        loc_vec = torch.sum(torch.cat(tuple(torch.mm(Sld[i], torch.mm(Ttd[i], loc[i])) for i in xrange(loc_len)) ))
-        usr_vec = torch.mm(self.weight_ih, hx)
-        hx = loc_vec + usr_vec # hidden_size x 1
-        return self.sigmoid(hx)
-
-    def loss(self, user, td_upper, td_lower, ld_upper, ld_lower, loc, dst, hx):
-        h_tq = self.forward(td_upper, td_lower, ld_upper, ld_lower, loc, hx)
-        p_u = self.permanet_weight(user)
-        q_v = self.location_weight(dst)
-        output = torch.mm(q_v, (h_tq + torch.t(p_u)))
-
-        return torch.log(1+torch.exp(torch.neg(output)))
-
-    def validation(self, user, td_upper, td_lower, ld_upper, ld_lower, loc, dst, hx):
-        # error exist in distance (ld_upper, ld_lower)
-        h_tq = self.forward(td_upper, td_lower, ld_upper, ld_lower, loc, hx)
-        p_u = self.permanet_weight(user)
-        user_vector = h_tq + torch.t(p_u)
-        ret = torch.mm(self.location_weight.weight, user_vector).data.cpu().numpy()
-        return np.argsort(np.squeeze(-1*ret))
 
 ###############################################################################################
 def parameters(strnn_model):
@@ -167,7 +110,7 @@ def run(user, td, ld, loc, dst, step):
     #neg_loc = Variable(torch.FloatTensor(1).uniform_(0, len(poi2pos)-1).long()).type(ltype)
     #(neg_lati, neg_longi) = poi2pos.get(neg_loc.data.cpu().numpy()[0])
     rnn_output = h_0
-    for idx in xrange(seqlen-1):
+    for idx in range(seqlen-1):
         td_upper = Variable(torch.from_numpy(np.asarray(up_time-td[idx]))).type(ftype)
         td_lower = Variable(torch.from_numpy(np.asarray(td[idx]-lw_time))).type(ftype)
         ld_upper = Variable(torch.from_numpy(np.asarray(up_dist-ld[idx]))).type(ftype)
@@ -211,7 +154,7 @@ def train(model):
     except FileNotFoundError:
         checkpoint = None
 
-    for i in xrange(num_epochs if checkpoint is None else num_epochs - checkpoint['epoch']):
+    for i in range(num_epochs if checkpoint is None else num_epochs - checkpoint['epoch']):
         # Training
         total_loss = 0.
 
@@ -241,6 +184,7 @@ def train(model):
 
             loss_per_epoch[i] = total_loss
         except KeyboardInterrupt:
+            print("saving progress...")
             torch.save({
                 'epoch': i,
                 'model_state_dict': model.state_dict(),
@@ -248,39 +192,16 @@ def train(model):
                 'current_loss': total_loss,
                 'loss_per_epoch': loss_per_epoch
             }, "checkpoint.tar")
-            raise KeyboardInterrupt()
+            sys.exit()
 
 
 ###############################################################################################
 
 
-def multiproc_train(model, num_proc):
-    """
-    Train the model across `num_proc` processes
-    :param model: torch model instance
-    :param optimizer: torch optimizer instance
-    :param: num_proc: number of processes
-    :return:
-    """
-    model.share_memory()
-    processes = []
-    # launch the processes
-    print("launching processes...")
-    for rank in range(num_proc):
-        p = mp.Process(target=train, args=(model,))
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
-
-
-
-
-
 if __name__ == '__main__':
-    strnn_model = STRNNCell(dim)
+    strnn_model = STRNN(dim, loc_cnt, user_cnt)
     optimizer = optim.SGD(parameters(strnn_model), lr=learning_rate, momentum=momentum, weight_decay=reg_lambda)
-    num_processes = torch.get_num_threads()
+    # num_processes = torch.get_num_threads()
     train(strnn_model)
 
 
