@@ -15,9 +15,11 @@ from model import STRNN
 # ==================================================
 aparse = configargparse.ArgumentParser(description='train STRNNN model')
 
+# Model Hyper parameters
 aparse.add_argument('-d', '--dim', default=13, type=int, help='Dimensionality of the hidden layers')
 aparse.add_argument('-w', '--ww', default=360, type=int, help='width of the time window in minutes') #TODO generate preprocessed data
 aparse.add_argument('-r', '--reg_lambda', default=0.1, type=float, help='weight decay')
+# Training Parameters
 aparse.add_argument('-b', '--batch_size', default=2, type=int, help='size of each training batch ')
 aparse.add_argument('-n', '--num_epochs', default=20, type=int, help='number of training iterations')
 aparse.add_argument('-l', '--learning_rate', default=0.001, type=float)
@@ -36,11 +38,6 @@ args, unknown = aparse.parse_known_args()
 ftype = torch.FloatTensor
 ltype = torch.LongTensor
 
-# Data loading params
-# train_file = './prepro_train_50.txt'
-# valid_file = "./prepro_valid_50.txt"
-# test_file = "./prepro_test_50.txt"
-
 # Data Preparation
 # ===========================================================
 # Load data
@@ -48,10 +45,6 @@ print("Loading data...")
 train_user, train_td, train_ld, train_loc, train_dst = data_loader.treat_prepro(args.train_file, step=1)
 valid_user, valid_td, valid_ld, valid_loc, valid_dst = data_loader.treat_prepro(args.valid_file, step=2)
 test_user, test_td, test_ld, test_loc, test_dst = data_loader.treat_prepro(args.test_file, step=3)
-
-# Model Hyper parameters
-# dim = 13    # dimensionality
-# ww = 720  # winodw width (6h)
 
 
 def bound(interval_list, fun):
@@ -68,26 +61,7 @@ up_dist = bound(train_ld, max)
 lw_dist = bound(train_ld, min)
 user_cnt = len(train_user) + len(valid_user) + len(test_user)
 loc_cnt = sum(len(i) for i in train_loc) + sum(len(i) for i in valid_loc) + sum(len(i) for i in test_loc)
-
-# up_time = 560632.0  # min
-# lw_time = 0.
-# up_dist = 457.335   # km
-# lw_dist = 0.
-# reg_lambda = 0.1
-
-# Training Parameters
-# batch_size = 2
-# num_epochs = 30
-# learning_rate = 0.001
-# momentum = 0.9
-# evaluate_every = 1
 h_0 = Variable(torch.randn(args.dim, 1), requires_grad=False).type(ftype)
-
-# user_cnt = 32899 #50 #107092#0
-# loc_cnt = 1115406 #50 #1280969#0
-# user_cnt = 42242 #30
-# loc_cnt = 1164559 #30
-
 
 print("User/Location: {:d}/{:d}".format(user_cnt, loc_cnt))
 print("max/min time interval: {} / {} min".format(up_time, lw_time))
@@ -116,8 +90,6 @@ def print_score(batches, step):
 
     for batch in tqdm.tqdm(batches, desc="validation" if step == 2 else 'Test'):
         batch_user, batch_td, batch_ld, batch_loc, batch_dst = batch
-        #if len(batch_loc) < 3:
-        #    continue
         iter_cnt += 1
         batch_o, target = run(batch_user, batch_td, batch_ld, batch_loc, batch_dst, step=step)
 
@@ -217,8 +189,6 @@ def train(model):
                 # inner_batches = data_loader.inner_iter(train_batch, batch_size)
                 # for k, inner_batch in inner_batches:
                 batch_user, batch_td, batch_ld, batch_loc, batch_dst = train_batch  # inner_batch)
-                #if len(batch_loc) < 3:
-                #    continue
                 loss = run(batch_user, batch_td, batch_ld, batch_loc, batch_dst, step=1)
                 total_loss += loss
                 # if (j+1) % 2000 == 0:
@@ -247,7 +217,6 @@ def train(model):
 
 strnn_model = STRNN(args.dim, loc_cnt, user_cnt)
 optimizer = optim.SGD(parameters(strnn_model), lr=args.learning_rate, momentum=args.momentum, weight_decay=args.reg_lambda)
-# num_processes = torch.get_num_threads()
 train(strnn_model)
 
 
